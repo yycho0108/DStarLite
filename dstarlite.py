@@ -5,16 +5,13 @@ import numpy as np
 import itertools
 from typing import Hashable, Callable, Tuple
 from collections import defaultdict, deque
-# import heapq
+import heapq
 from queue import PriorityQueue
 
 from dataclasses import dataclass, field
 from tqdm.auto import tqdm
 
-#@dataclass(order=True)
-#class DStarEntry:
-#    key: Tuple[float,float]
-#    item: Any=field(compare=False)
+from grid_world import GridWorld2D, create_updates
 
 
 class DStarQueue:
@@ -46,6 +43,44 @@ class DStarQueue:
 
     def __contains__(self, node):
         return (node in self.q)
+
+#class DStarQueue:
+#    """
+#    A* priority queue.
+#    """
+#
+#    def __init__(self):
+#        """
+#
+#        Args:
+#            max_cost: The max cost, beyond which to suppress insertion.
+#            weight:   The weight to apply to heuristic for weighted A*.
+#        """
+#        self._q = []
+#
+#    def insert(self, node: Hashable, key: Tuple[float, float]):
+#        """Add an element to the priority queue."""
+#        heapq.heappush(self._q, (key, node))
+#
+#    def pop(self) -> Tuple[NodeType, float, float]:
+#        """Pop the top item and return that item."""
+#        # NOTE(ycho): `heappop` pops the *smallest* item off the heap.
+#        key, node = heapq.heappop(self._q)
+#        return (x, g, f)
+#
+#    def top_key(self):
+#        return self._q[0][0]
+#
+#    def top(self):
+#        return self._q[0][1]
+#
+#    def __contains__(self, node):
+#        # Why?
+#        return (node in self._q)
+#
+#    def size(self):
+#        """Size of the priority queue; |OpenSet|"""
+#        return len(self._q)
 
 
 class DStar:
@@ -143,13 +178,21 @@ class DStar:
              on_expand):
         s_last = init  # s_last, L#29
         self._initialize(init, goal)
-        self._compute_shortest_path(init, goal, on_expand)
+
+        try:
+            self._compute_shortest_path(init, goal, on_expand)
+        except ValueError:
+            yield None, None
+            return
         g = self._g
 
         s_start = init
         while s_start != goal:
             # Determine best next state.
             s_nexts = self._n(s_start)
+            if len(s_nexts) <= 0:
+                yield (None, None)
+                return
             costs = [self._c(s_start, s) + g[s] for s in s_nexts]
             s_start = s_nexts[np.argmin(costs)]
 
@@ -176,8 +219,8 @@ class DStar:
                     # self._c() will always compute the updated cost function.
                     # Since we're operating over an implicitly defined graph,
                     # we'd have to make this assumption.
-                    u = tuple(u)
-                    v = tuple(v)
+                    # u = tuple(u)
+                    # v = tuple(v)
                     c_new = self._c(u, v)
                     if c_old > c_new:
                         if u != goal:
@@ -195,156 +238,8 @@ class DStar:
                 if len(updates) > 0:
                     # TODO(ycho): what if goal also changed?
                     # (does it happen?)
-                    self._compute_shortest_path(s_start, goal, on_expand)
-
-
-class GridWorld2D:
-    def __init__(self, m: np.ndarray, v_obs: int = 0):
-        self.m = m
-        self.v_obs = v_obs
-
-        # NOTE(ycho): up-down-left-right
-        # self.delta = list(itertools.product([-1, 1], repeat=2))
-        self.delta = [[-1, 0],
-                      [0, -1],
-                      [0, 1],
-                      [1, 0]]
-
-    def _heuristic(self, a: Tuple[int, int], b: Tuple[int, int]):
-        # return np.linalg.norm((a[0] - b[0], a[1] - b[1]))
-        return np.abs(np.subtract(a, b)).sum()
-
-    def _prev(self, a: Tuple[int, int]):
-        out = [(a[0] + d[0], a[1] + d[1]) for d in self.delta]
-        # out-of-bounds
-        out = [
-            o for o in out if (
-                0 <= o[0] and 0 <= o[1] and o[0] < self.m.shape[0] and o[1] < self.m.shape[1])]
-        # obstacle
-        out = [o for o in out if self.m[o[0], o[1]] != self.v_obs]
-        return out
-
-    def _next(self, a: Tuple[int, int]):
-        out = [(a[0] + d[0], a[1] + d[1]) for d in self.delta]
-        # out-of-bounds
-        out = [
-            o for o in out if (
-                0 <= o[0] and 0 <= o[1] and o[0] < self.m.shape[0] and o[1] < self.m.shape[1])]
-        # obstacle
-        out = [o for o in out if self.m[o[0], o[1]] != self.v_obs]
-        return out
-
-    def _cost(self, a: Tuple[int, int], b: Tuple[int, int]):
-        if np.any([
-                np.less(a, 0).any(),
-                np.greater_equal(a, self.m.shape).any(),
-                np.less(b, 0).any(),
-                np.greater_equal(b, self.m.shape).any()]):
-            return 100000
-        if self.m[b[0], b[1]] == self.v_obs:
-            return 100000
-        return np.linalg.norm((a[0] - b[0], a[1] - b[1]))
-
-
-def create_updates(world,
-        init,
-        goal,
-                   v_obs: int = 0,
-                   p: float = 0.3):
-    m = world.m
-
-    # (1) apply random flips on the map with probability `p`.
-    flip = np.random.choice([0,255], m.shape, replace=True, p=[
-                            1 - p, p]).astype(np.uint8)
-    if True:
-        #flip[init[0]-10:init[0]+10,
-        #        init[1]-10:init[1]+10] = False
-
-        #flip[:init[0] - 10] = False
-        #flip[init[0] + 10:] = False
-        #flip[:, :init[1] - 10] = False
-        #flip[:, init[1] + 10:] = False
-
-        flip[:init[0] - 10] = False
-        flip[init[0] + 10:] = False
-        flip[:, :init[1] - 10] = False
-        flip[:, init[1] + 10:] = False
-    m2 = m ^ flip
-
-    pos = np.argwhere(flip)
-
-    #if True:
-    #    pos - init
-
-    #idx = np.where(m2)
-    #print(np.shape(idx))
-
-    #msk = (m[idx] == v_obs)
-
-    ## (1) all `now-occupied` nodes will have edge costs=inf.
-    #pos = np.transpose(idx)
-    #pos[msk]
-
-    out = {'edges': []}
-    for p in pos:
-        for d in world.delta:
-            # src, dst, c_old
-            out['edges'].append((p, p + d, world._cost(p, p + d)))
-            out['edges'].append((p + d, p, world._cost(p + d, p)))
-
-    # Update the map ...
-    world.m = m2
-
-    return out
-
-
-def main():
-    # m = np.random.choice([0, 1], size=(256, 256), replace=True)
-    m = cv2.imread(
-        '/home/jamiecho/Repos/NextBestView/src/opensearch/data/map.png',
-        cv2.IMREAD_GRAYSCALE)
-
-    factor = 2
-    m = cv2.erode(m, np.ones(3), iterations=3)
-    m = cv2.resize(
-        m,
-        dsize=None,
-        fx=1 / factor,
-        fy=1 / factor,
-        interpolation=cv2.INTER_NEAREST)
-
-    _, m = cv2.threshold(m, 128, 255, cv2.THRESH_BINARY)
-    world = GridWorld2D(m)
-
-    init = (124 // factor, 107 // factor)
-    goal = (276 // factor, 107 // factor)
-    dstar = DStar(world._heuristic, world._prev, world._next, world._cost)
-
-    # m2 = m.copy()
-    vis = cv2.cvtColor(m, cv2.COLOR_GRAY2RGB)
-
-    def on_expand(node: Hashable):
-        # cv2.circle(vis, node[::-1], 1, (255, 0, 0))
-        vis[node[0], node[1]] = (255, 0, 0)
-        cv2.namedWindow('vis', cv2.WINDOW_NORMAL)
-        cv2.imshow('vis', vis)
-        cv2.waitKey(1)
-
-    prev = init
-    mod = 1
-    for (action, updates) in dstar.plan(init, goal, on_expand):
-        cv2.line(vis, init[::-1], action[::-1], (0, 0, 255),)
-        cv2.imshow('vis', vis)
-        cv2.waitKey(100)
-        init = action
-        if mod:
-            us = create_updates(world, init, goal)
-            updates.update(us)
-            mod = False
-
-            # NOTE(ycho): reset vis.
-            vis = cv2.cvtColor(world.m, cv2.COLOR_GRAY2RGB)
-
-
-if __name__ == '__main__':
-    main()
+                    try:
+                        self._compute_shortest_path(s_start, goal, on_expand)
+                    except ValueError:
+                        yield None, None
+                        return
